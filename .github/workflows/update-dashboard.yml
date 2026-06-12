@@ -4,16 +4,22 @@ on:
   schedule:
     - cron: '0 0 * * *'   # 09:00 KST
     - cron: '0 5 * * *'   # 14:00 KST
-  workflow_dispatch:       # GitHub 화면에서 "Run workflow" 버튼으로 수동 실행
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:              # ✏️ 동시 실행 방지
+  group: update-dashboard
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main       # ✏️ Re-run이어도 항상 최신 main 기준
 
       - uses: actions/setup-python@v5
         with:
