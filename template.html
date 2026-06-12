@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<!-- v2: snapshot fallback + robust unwrap + QA fixes -->
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>전사 서버 운용 현황</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
+<style>
+:root { color-scheme: light;
+  --bg:#f4f6f9; --card:#ffffff; --ink:#1a2230; --muted:#64748b; --line:#e3e8ef;
+  --green:#16a34a; --blue:#2563eb; --amber:#d97706; --gray:#94a3b8; --red:#dc2626;
+  --rack:#232a38; --rack-rail:#161c27; --unit:#3a4356; --unit-hi:#48536b;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI','Malgun Gothic',system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;padding:20px;}
+h1{font-size:19px;font-weight:700}
+.sub{color:var(--muted);font-size:12px;margin-top:3px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.srcBadge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:10.5px;font-weight:700}
+.srcBadge.live{background:#dcfce7;color:#15803d}
+.srcBadge.snap{background:#fef3c7;color:#b45309}
+.srcBadge.loading{background:#e0e7ff;color:#3730a3}
+.topbar{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between;margin-bottom:14px}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.filters select,.filters input{padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:12.5px;color:var(--ink)}
+.filters input{width:160px}
+.filters button{padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:12px;color:var(--muted);cursor:pointer}
+.filters button:hover{background:#f1f5f9}
+.matchInfo{font-size:11.5px;color:var(--muted)}
+#btnRefresh{padding:3px 9px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:11px;color:var(--ink);cursor:pointer}
+#btnRefresh:hover{background:#f1f5f9}
+#btnRefresh:disabled{opacity:.55;cursor:default}
+#liveWarn{display:none;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:12.5px;line-height:1.5}
+
+/* KPI */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.kpi .v{font-size:22px;font-weight:700;line-height:1.2}
+.kpi .l{font-size:11.5px;color:var(--muted);margin-top:2px}
+.kpi.green .v{color:var(--green)} .kpi.blue .v{color:var(--blue)} .kpi.amber .v{color:var(--amber)} .kpi.gray .v{color:var(--gray)} .kpi.teal .v{color:#0d9488}
+
+/* 주간 싱크 박스 */
+.syncbox{background:#eef4ff;border:1px solid #c7d8f8;border-radius:12px;padding:12px 16px;margin-bottom:16px}
+.syncbox h3{font-size:13px;color:#1d4ed8;margin-bottom:6px}
+.syncbox ul{list-style:none}
+.syncbox li{font-size:12.5px;padding:2px 0;color:#243b6b}
+.syncbox li b{font-weight:700}
+.pill{display:inline-block;padding:1px 7px;border-radius:99px;font-size:10.5px;font-weight:700;margin-right:6px;vertical-align:1px}
+.pill.end{background:#fee2e2;color:#b91c1c}.pill.new{background:#dcfce7;color:#15803d}.pill.info{background:#e0e7ff;color:#3730a3}
+
+/* 가용 현황 & 공석 예정 */
+.freebox{background:#ecfdf5;border:1px solid #b7e3d0;border-radius:12px;padding:12px 16px;margin-bottom:14px}
+.freebox h3{font-size:13px;color:#047857;margin-bottom:8px}
+.fchips{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.fchip{background:#fff;border:1px solid #b7e3d0;border-radius:8px;padding:4px 9px;font-size:11.5px;color:#065f46}
+.fchip.now{background:#047857;color:#fff;border-color:#047857;font-weight:700}
+.fchip.soon{border-color:#fca5a5;background:#fef2f2;color:#b91c1c}
+.farrow{color:#94a3b8;font-size:11px}
+.fmuted{opacity:.65}
+
+/* 레이아웃 */
+.main{display:flex;gap:16px;align-items:flex-start}
+.racksCol{flex:1;min-width:0;display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.floor{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;flex:1 1 auto;min-width:280px}
+.floor h2{font-size:15px;margin-bottom:2px}
+.floor .fsub{font-size:11.5px;color:var(--muted);margin-bottom:12px}
+.rackRow{display:flex;gap:18px;flex-wrap:wrap}
+
+/* 랙 */
+.rackWrap{display:flex;flex-direction:column;align-items:center}
+.rackName{font-size:11.5px;font-weight:700;color:var(--muted);margin-bottom:6px;letter-spacing:.4px}
+.rack{background:var(--rack);border-radius:8px;padding:10px 6px;width:236px;box-shadow:0 6px 16px rgba(15,23,42,.25), inset 0 0 0 1px #303a4d;position:relative}
+.rack::before,.rack::after{content:"";position:absolute;top:10px;bottom:10px;width:7px;background:repeating-linear-gradient(to bottom,var(--rack-rail) 0 4px,#2b3445 4px 7px,var(--rack-rail) 7px 15px);border-radius:3px}
+.rack::before{left:5px}.rack::after{right:5px}
+.rackInner{margin:0 12px;display:flex;flex-direction:column;gap:2px}
+.unit{position:relative;border-radius:4px;background:linear-gradient(180deg,var(--unit-hi),var(--unit) 55%,#333c4e);cursor:pointer;overflow:hidden;border:1px solid #222a3a;transition:outline .12s, transform .12s}
+.unit:hover{transform:scale(1.02)}
+.unit.sel{outline:2.5px solid #60a5fa;box-shadow:0 0 12px rgba(96,165,250,.55);z-index:2}
+.unit.dim{opacity:.22;filter:grayscale(.6)}
+.unit .vstrip{position:absolute;left:0;top:0;bottom:0;width:4px}
+.unit .vents{position:absolute;right:5px;top:4px;height:20px;width:26px;background:repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 2px,transparent 2px 5px);border-radius:2px;pointer-events:none}
+.u4{min-height:62px}.u2{min-height:31px}
+.unit .row1{display:flex;align-items:center;gap:6px;padding:7px 36px 0 12px;min-width:0}
+.u2 .row1{padding-top:6px;padding-right:34px}
+.led{width:8px;height:8px;border-radius:50%;flex:none}
+.led.on{background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 1.6s infinite}
+.led.plan{background:var(--blue);box-shadow:0 0 5px var(--blue)}
+.led.setup{background:var(--amber);box-shadow:0 0 6px var(--amber);animation:blink 1s infinite}
+.led.idle{background:var(--gray)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+@keyframes blink{0%,55%{opacity:1}56%,100%{opacity:.2}}
+.sid{font-family:Consolas,monospace;font-size:11px;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.mode{margin-left:auto;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.14);color:#dbe3f0;white-space:nowrap;flex:none}
+.row2{display:flex;align-items:center;gap:5px;padding:6px 36px 0 12px;min-width:0}
+.vname{font-size:9px;color:#94a3b8;width:60px;flex:none;letter-spacing:.3px}
+.chips{display:flex;gap:2.5px;align-items:center;flex-wrap:nowrap;min-width:0;overflow:hidden}
+.chip{width:9px;height:9px;border-radius:2px;flex:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3)}
+.qty{font-size:9px;color:#cbd5e1;margin-left:3px;white-space:nowrap}
+.vlogo{display:block;flex:none}
+.gbar{display:flex;gap:2px;align-items:center;margin-left:auto}
+.gbar .cell{width:9px;height:11px;border-radius:2px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.05);flex:none}
+.gbar .cell.on{border-color:rgba(0,0,0,.35)}
+.gbar .gtxt{font-size:9px;color:#cbd5e1;margin-left:3px}
+.empty1u{height:15.5px;border-radius:3px;background:repeating-linear-gradient(45deg,#2a3140 0 6px,#262d3c 6px 12px);border:1px solid #222a3a;opacity:.7}
+.tasksArea{display:flex;flex-direction:column;gap:3px;padding:5px 8px 8px 12px}
+.tbox{display:flex;align-items:center;gap:6px;font-size:9.5px;line-height:1.3;padding:3px 6px;border-radius:4px;border:1px solid transparent;font-weight:600}
+.tbox .ttxt{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mbar{display:flex;gap:1.5px;align-items:center;flex:none}
+.mcell{width:6px;height:8px;border-radius:1.5px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.05);flex:none}
+.mcell.on{border-color:rgba(0,0,0,.35)}
+.mtxt{font-size:8.5px;margin-left:2px;opacity:.85}
+.tbox.run{background:rgba(34,197,94,.16);border-color:rgba(74,222,128,.45);color:#bbf7d0}
+.tbox.soon{background:rgba(239,68,68,.16);border-color:rgba(248,113,113,.55);color:#fecaca}
+.tbox.always{background:rgba(148,163,184,.14);border-color:rgba(148,163,184,.4);color:#e2e8f0}
+.tbox.plan{background:rgba(59,130,246,.16);border-color:rgba(96,165,250,.5);color:#bfdbfe}
+.tbox.idle{background:rgba(45,212,191,.08);border:1px dashed rgba(45,212,191,.55);color:#7dd3c8;text-align:center}
+.tbox.free{background:rgba(45,212,191,.08);border:1px dashed rgba(45,212,191,.55);color:#7dd3c8;text-align:center}
+.tbox.idle,.tbox.free{justify-content:center}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;margin-bottom:8px;font-size:11px;color:var(--muted)}
+.legend span{display:flex;align-items:center;gap:5px}
+
+/* 상세 패널 */
+.detail{width:292px;flex:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;position:sticky;top:12px}
+.detail h3{font-size:14px;font-family:Consolas,monospace;word-break:break-all}
+.detail .placeholder{color:var(--muted);font-size:12.5px;text-align:center;padding:30px 0;line-height:1.7}
+.dl{margin-top:10px}
+.dl div{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--line);font-size:12px}
+.dl dt{color:var(--muted);flex:none}
+.dl dd{text-align:right;word-break:break-all;font-weight:600}
+.dtasks{margin-top:12px}
+.dtasks h4{font-size:11.5px;color:var(--muted);margin-bottom:6px}
+.dtask{border:1px solid var(--line);border-radius:8px;padding:7px 9px;margin-bottom:6px;font-size:12px}
+.dtask .tn{font-weight:700}
+.dtask .tp{color:var(--muted);font-size:11px;margin-top:2px}
+.nlink{display:inline-block;margin-top:10px;font-size:12px;color:var(--blue);text-decoration:none;font-weight:600}
+.stbadge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:10.5px;font-weight:700;margin-left:6px;vertical-align:2px;white-space:nowrap}
+.st-가동{background:#dcfce7;color:#15803d}.st-셋업{background:#fef3c7;color:#b45309}.st-예정{background:#dbeafe;color:#1d4ed8}.st-유휴{background:#f1f5f9;color:#64748b}
+
+/* 대시보드 */
+.dash h2{font-size:15px;margin:14px 0 10px}
+.chartGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.chartCard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+.chartCard h3{font-size:12.5px;color:var(--muted);margin-bottom:8px}
+.chartBox{position:relative;height:200px}
+.chartFallback{font-size:12px;color:var(--muted);padding:10px 0;line-height:1.8}
+
+/* 테이블 공통 */
+.tableCard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:12px;overflow-x:auto}
+.tableCard h2{margin:0 0 10px;font-size:15px}
+table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px}
+th{text-align:left;color:var(--muted);font-weight:600;font-size:11.5px;padding:6px 8px;border-bottom:1.5px solid var(--line);white-space:nowrap}
+td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+tr.trow{cursor:pointer} tr.trow:hover{background:#f8fafc}
+td.mono{font-family:Consolas,monospace;font-size:12px;white-space:nowrap}
+.dday{font-weight:700} .dday.warn{color:var(--red)} .dday.ok{color:var(--muted)}
+
+/* 간트 */
+.gantt{margin-top:14px}
+.gRow{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.gLabel{width:110px;flex:none;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gTrack{flex:1;height:16px;background:#f1f5f9;border-radius:4px;position:relative;overflow:hidden}
+.gBar{position:absolute;top:2px;bottom:2px;border-radius:3px;background:#93c5fd}
+.gBar.act{background:#4ade80}.gBar.done{background:#cbd5e1}
+.gWrap{position:relative;padding-top:20px}
+.gTickLbl{position:absolute;top:0;font-size:9.5px;color:var(--muted);white-space:nowrap;z-index:1}
+.gGrid{position:absolute;top:16px;bottom:0;width:0;border-left:1px dashed #dde3ed;z-index:0}
+.gEnd{position:absolute;top:0;line-height:16px;font-size:9.5px;font-weight:700;color:#334155;z-index:2}
+.gEnd.warn{color:var(--red)}
+.todayLine{position:absolute;top:14px;bottom:0;width:0;border-left:2px dashed var(--red);z-index:3}
+.gScale{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin:4px 0 0 118px}
+footer{margin-top:18px;font-size:11px;color:var(--muted);text-align:center;line-height:1.6}
+@media (max-width:900px){ .main{flex-direction:column} .detail{width:100%;position:static} }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <h1>🖥️ 전사 서버 운용 현황</h1>
+    <div class="sub"><span class="srcBadge loading" id="srcBadge">불러오는 중…</span><button id="btnRefresh" type="button" title="Notion에서 최신 데이터를 다시 조회합니다">🔄 새로고침</button><span id="updatedAt"></span></div>
+  </div>
+  <div class="filters">
+    <input id="fQ" type="search" placeholder="서버 ID / IP / 작업 검색">
+    <select id="fMode"><option value="">운용형태: 전체</option></select>
+    <select id="fStatus">
+      <option value="">상태: 전체</option>
+      <option value="가동">가동 중</option>
+      <option value="셋업">셋업 중</option>
+      <option value="예정">예정</option>
+      <option value="유휴">유휴</option>
+    </select>
+    <button id="fReset" type="button">초기화</button>
+    <span class="matchInfo" id="matchInfo"></span>
+  </div>
+</div>
+
+<div id="liveWarn"></div>
+
+<div class="syncbox" id="syncbox" style="display:none">
+  <h3>📌 일일 싱크 포인트 <span style="font-weight:400" id="syncRange"></span></h3>
+  <ul id="syncList"></ul>
+</div>
+
+<div class="freebox" id="freebox" style="display:none"></div>
+
+<div class="kpis" id="kpis"></div>
+
+<div class="legend" id="legend"></div>
+
+<div class="main">
+  <div class="racksCol" id="floors"></div>
+  <div class="detail" id="detail"></div>
+</div>
+
+<div class="dash">
+  <h2>📊 운용 대시보드</h2>
+  <div class="chartGrid">
+    <div class="chartCard"><h3>GPU/NPU 구성 (총 장수)</h3><div class="chartBox" id="boxGpu"><canvas id="cGpu"></canvas></div></div>
+    <div class="chartCard"><h3>운용형태 분포</h3><div class="chartBox" id="boxMode"><canvas id="cMode"></canvas></div></div>
+    <div class="chartCard"><h3>층별 서버 상태</h3><div class="chartBox" id="boxFloor"><canvas id="cFloor"></canvas></div></div>
+  </div>
+
+  <div class="tableCard">
+    <h2>🗂️ 서버 사용 현황 (작업별)</h2>
+    <table>
+      <thead><tr><th>상태</th><th>작업</th><th>서버</th><th>활용 GPU/NPU</th><th>사용 기간</th><th>D-Day</th></tr></thead>
+      <tbody id="taskBody"></tbody>
+    </table>
+    <div class="gantt" id="gantt"></div>
+  </div>
+
+  <div class="tableCard">
+    <h2>📋 전체 서버 목록</h2>
+    <table>
+      <thead><tr><th>상태</th><th>서버 ID</th><th>위치/랙</th><th>모델</th><th>GPU/NPU</th><th>카드</th><th>운용형태</th><th>IP(서비스)</th><th>IP(BMC)</th><th>시리얼</th><th>현재 작업</th></tr></thead>
+      <tbody id="serverBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<footer id="srcNote"></footer>
+
+<script>
+
+(function(){
+"use strict";
+/* ===================== 상수 ===================== */
+var TOOL='mcp__c82c6377-21ea-4255-ba2f-0b4aabfeca9f__notion-query-database-view';
+var SERVERS_VIEW='https://app.notion.com/p/37d888f36d5180cd9656e1316caa5bcd?v=37d888f36d5180de95f6000c4fb77dd7';
+var USAGE_VIEW='https://app.notion.com/p/37d888f36d518000b813edc35108f67a?v=37d888f36d5180daa464000c55a947ce';
+var LS_KEY='server-rack-dashboard:filters';
+var RACK_CAP=18;
+var VENDORS={
+SM:{name:'SUPERMICRO',color:'#3b82f6',logo:'<svg class="vlogo" viewBox="0 0 88 14" height="12" xmlns="http://www.w3.org/2000/svg"><circle cx="7" cy="7" r="6.5" fill="#76b900"/><path d="M9.8 4.6c-.8-.9-2.4-1.2-3.5-.7-1 .5-1.1 1.6-.3 2.2.9.7 2.8.9 3.5 1.9.6 1-.1 2.1-1.3 2.5-1.2.4-2.7-.1-3.4-.9" stroke="#fff" stroke-width="1.3" fill="none" stroke-linecap="round"/><text x="16" y="11" font-family="Arial" font-size="9.5" font-weight="bold" fill="#dbe3f0" letter-spacing=".4">SUPERMICRO</text></svg>'},
+GB:{name:'GIGABYTE',color:'#f97316',logo:'<svg class="vlogo" viewBox="0 0 76 14" height="12" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="1" width="12" height="12" rx="2.5" fill="#f5821f"/><text x="6.2" y="10.8" font-family="Arial" font-size="9.5" font-weight="bold" fill="#fff" text-anchor="middle">G</text><text x="16" y="11" font-family="Arial" font-size="9.5" font-weight="bold" fill="#dbe3f0" letter-spacing=".3">GIGABYTE</text></svg>'},
+DE:{name:'DELL',color:'#14b8a6',logo:'<svg class="vlogo" viewBox="0 0 48 14" height="12" xmlns="http://www.w3.org/2000/svg"><circle cx="7" cy="7" r="6.3" fill="none" stroke="#41b6e6" stroke-width="1.4"/><text x="7" y="9.3" font-family="Arial" font-size="4.6" font-weight="bold" fill="#41b6e6" text-anchor="middle" letter-spacing=".3">DELL</text><text x="17" y="11" font-family="Arial" font-size="9.5" font-weight="bold" fill="#41b6e6" letter-spacing="1">DELL</text></svg>'}
+};
+var MODEL_U={'AS-4125GS-TNRT2(4U)':4,'G494-ZB4-AAP2':4,'XE7745':4,'R7525':2};
+var CHIP_COLORS={'H100':'#ef4444','ATOM MAX':'#a3a3a3','NPU':'#a855f7','RTX-PRO6000':'#3b82f6','A100-40G':'#eab308'};
+var MODE_COLORS={'Baremetal':'#8b5cf6','VM':'#f97316','Fractos 1.0':'#a16207','Fractos 2.0':'#16a34a'};
+var LED_CLASS={'가동':'on','셋업':'setup','예정':'plan','유휴':'idle'};
+
+/* ============ 스냅샷 (2026-06-12 Notion 조회분 — 라이브 조회 실패 시 표시) ============ */
+var SNAPSHOT_AT='2026-06-12';
+var SNAPSHOT={servers:[
+{"이용 현황":"[\"https://app.notion.com/p/37d888f36d5180b5bdbcfecdaadc86d2\"]","IP 주소(서비스)":"192.168.170.xx","위치":"5층","서버 모델":"AS-4125GS-TNRT2(4U)","IP 주소(BMC)":"192.168.170.xx","서버 시리얼":"A50••••","운용형태":"Baremetal","구성 GPU/NPU":"[\"NPU 4장\"]","서버 ID":"SM4ATOM4-01","url":"https://app.notion.com/p/37d888f36d5180efbc92cb5599bfb545"},
+{"이용 현황":"[\"https://app.notion.com/p/37d888f36d5180a28cc8c5e80c982420\"]","IP 주소(서비스)":"192.168.170.xx","위치":"5층","서버 모델":"AS-4125GS-TNRT2(4U)","IP 주소(BMC)":"192.168.170.xx","서버 시리얼":"A50••••","운용형태":"Baremetal","구성 GPU/NPU":"[\"NPU 4장\"]","서버 ID":"SM4ATOM4-02","url":"https://app.notion.com/p/37d888f36d5180e190adf902725417c9"},
+{"이용 현황":"[\"https://app.notion.com/p/37d888f36d51804b8407c0b944131fdc\"]","IP 주소(서비스)":"192.168.170.xx","위치":"5층","서버 모델":"AS-4125GS-TNRT2(4U)","IP 주소(BMC)":"192.168.170.xx","서버 시리얼":"A50••••","운용형태":"Baremetal","구성 GPU/NPU":"[\"NPU 4장\"]","서버 ID":"SM4ATOM4-03","url":"https://app.notion.com/p/37d888f36d5180458b2fead57ec8e875"},
+{"이용 현황":"[\"https://app.notion.com/p/37d888f36d5180479b36d3c3798f2ee7\"]","IP 주소(서비스)":"192.168.170.xx","위치":"5층","서버 모델":"AS-4125GS-TNRT2(4U)","IP 주소(BMC)":"192.168.170.xx","서버 시리얼":"A50••••","운용형태":"Baremetal","구성 GPU/NPU":"[\"NPU 4장\"]","서버 ID":"SM4ATOM4-04","url":"https://app.notion.com/p/37d888f36d518086829ce024d4bd4897"},
+{"랙 넘버":"2","이용 현황":"[\"https://app.notion.com/p/37d888f36d518064be2ee21dad01adcb\"]","IP 주소(서비스)":"192.168.160.xx","위치":"10층","서버 모델":"G494-ZB4-AAP2","IP 주소(BMC)":"192.168.160.xx","서버 시리얼":"셋업 중","운용형태":"Baremetal","구성 GPU/NPU":"[\"NPU 2장\"]","서버 ID":"GB4ATOM2-05","url":"https://app.notion.com/p/37d888f36d518095ae60d68bfa09dc39"},
+{"랙 넘버":"2","이용 현황":"[\"https://app.notion.com/p/37d888f36d51806dbdffdab6495610b7\"]","IP 주소(서비스)":"192.168.160.xx","위치":"10층","서버 모델":"AS-4125GS-TNRT2(4U)","IP 주소(BMC)":"192.168.160.xx","서버 시리얼":"A50••••","운용형태":"Baremetal","구성 GPU/NPU":"[\"NPU 4장\"]","서버 ID":"SM4ATOM4-06","url":"https://app.notion.com/p/37d888f36d51800ca914dd9ec1ad147e"},
+{"랙 넘버":"2","이용 현황":"[\"https://app.notion.com/p/37d888f36d518092a325e18ea7b664e5\"]","IP 주소(서비스)":"192.168.160.xx","위치":"10층","서버 모델":"AS-4125GS-TNRT2(4U)","IP 주소(BMC)":"192.168.160.xx","서버 시리얼":"A50••••","운용형태":"VM","구성 GPU/NPU":"[\"NPU 8장\"]","서버 ID":"SM4ATOM8-07","url":"https://app.notion.com/p/37d888f36d5180a2b7fdf2f73ab8432b"},
+{"랙 넘버":"4","이용 현황":"[\"https://app.notion.com/p/37d888f36d51807aa046f4d84c775314\"]","IP 주소(서비스)":"192.168.160.xx","위치":"10층","서버 모델":"G494-ZB4-AAP2","IP 주소(BMC)":"192.168.160.xx","서버 시리얼":"GPG••••","운용형태":"Baremetal","구성 GPU/NPU":"[\"NPU 4장\"]","서버 ID":"GB4ATOM4-08","url":"https://app.notion.com/p/37d888f36d51801fb8efef9719ccf922"},
+{"이용 현황":"[\"https://app.notion.com/p/37d888f36d518092a325e18ea7b664e5\"]","IP 주소(서비스)":"192.168.160.xx","위치":"10층","서버 모델":"R7525","IP 주소(BMC)":"192.168.160.xx","서버 시리얼":"6S2••••","운용형태":"Baremetal","구성 GPU/NPU":"[\"A100-40G 2장\"]","서버 ID":"DE2A1002-01","url":"https://app.notion.com/p/37d888f36d51808d8879fca630df99c2"},
+{"이용 현황":"[\"https://app.notion.com/p/37d888f36d518092a325e18ea7b664e5\"]","IP 주소(서비스)":"192.168.160.xx","위치":"10층","서버 모델":"R7525","IP 주소(BMC)":"192.168.160.xx","서버 시리얼":"5S2••••","운용형태":"VM","구성 GPU/NPU":"[\"A100-40G 2장\"]","서버 ID":"DE2A1002-02","url":"https://app.notion.com/p/37d888f36d51803ca45ac651b16c9849"},
+{"이용 현황":"[\"https://app.notion.com/p/37d888f36d518092a325e18ea7b664e5\"]","IP 주소(서비스)":"192.168.160.xx","위치":"10층","서버 모델":"XE7745","IP 주소(BMC)":"192.168.160.xx","서버 시리얼":"6NZ••••","운용형태":"Baremetal","구성 GPU/NPU":"[\"RTX-PRO6000 8장\"]","서버 ID":"DE4RTX PRO 6000_8-1","url":"https://app.notion.com/p/37d888f36d51809194f0e8ae117c8577"},
+{"이용 현황":"[\"https://app.notion.com/p/37d888f36d518092a325e18ea7b664e5\"]","IP 주소(서비스)":"192.168.160.xx","위치":"10층","서버 모델":"XE7745","IP 주소(BMC)":"192.168.160.xx","서버 시리얼":"8NZ••••","운용형태":"Baremetal","구성 GPU/NPU":"[\"RTX-PRO6000 8장\"]","서버 ID":"DE4RTX PRO 6000_8-2","url":"https://app.notion.com/p/37d888f36d5180db87a5e5b4ecee49c1"}
+],usage:[
+{"운용 서버":"[\"https://app.notion.com/p/37d888f36d5180efbc92cb5599bfb545\"]","date:사용 기간:start":"2026-06-02","date:사용 기간:end":"2026-07-14","활용 GPU/NPU":"ATOM MAX 4장","작업":"클러쉬 PoC","url":"https://app.notion.com/p/37d888f36d5180b5bdbcfecdaadc86d2"},
+{"운용 서버":"[\"https://app.notion.com/p/37d888f36d51800ca914dd9ec1ad147e\"]","date:사용 기간:start":"2026-05-18","date:사용 기간:end":"2026-06-12","활용 GPU/NPU":"ATOM MAX 4장","작업":"디딤 PoC","url":"https://app.notion.com/p/37d888f36d51806dbdffdab6495610b7"},
+{"운용 서버":"[\"https://app.notion.com/p/37d888f36d518086829ce024d4bd4897\"]","date:사용 기간:start":"2026-05-06","date:사용 기간:end":"2026-07-01","활용 GPU/NPU":"ATOM MAX 4장","작업":"시즐 PoC","url":"https://app.notion.com/p/37d888f36d5180479b36d3c3798f2ee7"},
+{"운용 서버":"[\"https://app.notion.com/p/37d888f36d5180e190adf902725417c9\"]","date:사용 기간:start":"2026-06-02","date:사용 기간:end":"2026-06-16","활용 GPU/NPU":"ATOM MAX 4장","작업":"다누시스 PoC","url":"https://app.notion.com/p/37d888f36d5180a28cc8c5e80c982420"},
+{"운용 서버":"[\"https://app.notion.com/p/37d888f36d51801fb8efef9719ccf922\"]","date:사용 기간:start":"2026-06-12","date:사용 기간:end":"2026-06-26","활용 GPU/NPU":"ATOM MAX 4장","작업":"뱀부스 PoC","url":"https://app.notion.com/p/37d888f36d51807aa046f4d84c775314"},
+{"운용 서버":"[\"https://app.notion.com/p/37d888f36d5180458b2fead57ec8e875\"]","활용 GPU/NPU":"ATOM MAX 4장","작업":"S/W 테스트 1","url":"https://app.notion.com/p/37d888f36d51804b8407c0b944131fdc"},
+{"운용 서버":"[\"https://app.notion.com/p/37d888f36d518095ae60d68bfa09dc39\"]","활용 GPU/NPU":"ATOM MAX 2장","작업":"S/W 테스트 2","url":"https://app.notion.com/p/37d888f36d518064be2ee21dad01adcb"},
+{"운용 서버":"[\"https://app.notion.com/p/37d888f36d5180a2b7fdf2f73ab8432b\",\"https://app.notion.com/p/37d888f36d51808d8879fca630df99c2\",\"https://app.notion.com/p/37d888f36d51803ca45ac651b16c9849\",\"https://app.notion.com/p/37d888f36d51809194f0e8ae117c8577\",\"https://app.notion.com/p/37d888f36d5180db87a5e5b4ecee49c1\"]","활용 GPU/NPU":"ATOM MAX 8장","작업":"Infra 테스트 1","url":"https://app.notion.com/p/37d888f36d518092a325e18ea7b664e5"}
+]};
+
+/* ===================== 유틸 ===================== */
+function $(s){return document.querySelector(s)}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function jarr(s){if(Array.isArray(s))return s;try{var v=JSON.parse(s||'[]');return Array.isArray(v)?v:[]}catch(e){return[]}}
+function parseD(s){if(!s)return null;var m=String(s).slice(0,10).split('-');if(m.length<3)return null;return new Date(+m[0],+m[1]-1,+m[2])}
+function fmtDate(d){return d.getFullYear()+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+String(d.getDate()).padStart(2,'0')}
+function fmtS(s){return s?String(s).slice(0,10).replace(/-/g,'.'):''}
+var today=new Date();today.setHours(0,0,0,0);
+function dayDiff(d){return Math.round((d-today)/86400000)}
+function safe(label,fn){try{fn()}catch(e){try{console.error('['+label+']',e)}catch(_){}}}
+
+/* ============ MCP 응답 언랩핑 (여러 형태 방어적 처리) ============ */
+function unwrap(r){
+  if(!r)throw new Error('빈 응답');
+  if(r.isError){
+    var msg='';
+    if(Array.isArray(r.content))msg=r.content.map(function(c){return c&&c.text?c.text:''}).join(' ').slice(0,300);
+    throw new Error(msg||'MCP 호출 오류');
+  }
+  var cands=[];
+  if(r.structuredContent)cands.push(r.structuredContent);
+  if(Array.isArray(r.content))r.content.forEach(function(c){
+    if(c&&typeof c.text==='string')cands.push(c.text);
+    else if(c&&c.json)cands.push(c.json);
+  });
+  if(typeof r==='object'&&Array.isArray(r.results))cands.push(r);
+  for(var i=0;i<cands.length;i++){
+    var c=cands[i];
+    if(typeof c==='string'){
+      var t=c.trim();
+      var b=t.indexOf('{');
+      if(b<0)continue;
+      try{c=JSON.parse(t.slice(b))}catch(e){continue}
+    }
+    if(c&&Array.isArray(c.results))return c;
+    if(c&&c.structuredContent&&Array.isArray(c.structuredContent.results))return c.structuredContent;
+    if(c&&c.output&&Array.isArray(c.output.results))return c.output;
+  }
+  throw new Error('응답에서 results 배열을 찾지 못했습니다');
+}
+
+function queryAll(viewUrl){
+  var rows=[],cursor=null,guard=0;
+  function step(){
+    var args={view_url:viewUrl,page_size:100};
+    if(cursor)args.start_cursor=cursor;
+    return window.cowork.callMcpTool(TOOL,args).then(function(r){
+      var data=unwrap(r);
+      rows=rows.concat(data.results||[]);
+      cursor=(data.has_more&&data.next_cursor)?data.next_cursor:null;
+      if(cursor&&++guard<20)return step();
+      return rows;
+    });
+  }
+  return step();
+}
+
+/* 응답 스와프 방어: 호출 순서를 신뢰하지 않고 행의 실제 키로 서버/작업 데이터를 식별 */
+function fixSwap(a,b){
+  function isSrv(rows){return (rows||[]).some(function(r){return r&&('서버 ID' in r)})}
+  if(!isSrv(a)&&isSrv(b))return [b,a];
+  return [a,b];
+}
+
+/* ===================== 데이터 모델 ===================== */
+var servers=[],tasks=[],selUrl=null,charts=[];
+var dataLabel='';
+function chipFamily(g){return String(g).replace(/\s*\d+\s*장\s*$/,'').trim()}
+function chipQty(g){var m=String(g).match(/(\d+)\s*장/);return m?+m[1]:1}
+function taskState(t){
+  if(!t.start&&!t.end)return'상시';
+  if(t.start&&parseD(t.start)>today)return'예정';
+  if(t.end&&parseD(t.end)<today)return'종료';
+  return'진행';
+}
+function serverStatus(s){
+  if((s.serial||'').indexOf('셋업')>=0)return'셋업';
+  var st=s.tasks.map(taskState);
+  if(st.indexOf('진행')>=0||st.indexOf('상시')>=0)return'가동';
+  if(st.indexOf('예정')>=0)return'예정';
+  return'유휴';
+}
+function buildData(srows,urows){
+  tasks=(urows||[]).map(function(r){return{
+    name:r['작업']||'(이름 없음)',url:r.url||'',
+    serverUrls:jarr(r['운용 서버']),
+    gpu:r['활용 GPU/NPU']||'',
+    start:r['date:사용 기간:start']||null,
+    end:r['date:사용 기간:end']||null
+  }});
+  servers=(srows||[]).map(function(r){return{
+    id:r['서버 ID']||'(ID 없음)',url:r.url||'',
+    model:r['서버 모델']||'',loc:r['위치']||'기타',rack:r['랙 넘버']||null,
+    svcIp:r['IP 주소(서비스)']||'',bmcIp:r['IP 주소(BMC)']||'',
+    serial:r['서버 시리얼']||'',mode:r['운용형태']||'',
+    gpus:jarr(r['구성 GPU/NPU']),tasks:[]
+  }});
+  var byUrl={};
+  servers.forEach(function(s){if(s.url)byUrl[s.url]=s});
+  tasks.forEach(function(t){t.serverUrls.forEach(function(u){if(byUrl[u])byUrl[u].tasks.push(t)})});
+  servers.forEach(function(s){
+    s.uSize=MODEL_U[s.model]||((/^[A-Z]{2}4/.test(s.id))?4:2);
+    s.vendor=VENDORS[s.id.slice(0,2)]||{name:s.id.slice(0,2)||'?',color:'#64748b'};
+    s.status=serverStatus(s);
+  });
+}
+function activeTaskNames(s){
+  return s.tasks.filter(function(t){var st=taskState(t);return st==='진행'||st==='상시'}).map(function(t){return t.name});
+}
+function fmtMDg(d){return String(d.getMonth()+1).padStart(2,'0')+'.'+String(d.getDate()).padStart(2,'0')}
+function miniBar(usedN,cap,col){
+  if(!cap)return'';
+  var c='';
+  for(var i=0;i<Math.min(cap,8);i++)c+='<span class="mcell'+(i<usedN?' on':'')+'"'+(i<usedN?' style="background:'+col+'"':'')+'></span>';
+  return '<span class="mbar" title="이 작업 사용 '+usedN+'/'+cap+'장">'+c+'<span class="mtxt">'+usedN+'/'+cap+'</span></span>';
+}
+function taskBoxes(s){
+  var act=s.tasks.filter(function(t){return taskState(t)!=='종료'});
+  var cap=cardCap(s);
+  var col=CHIP_COLORS[chipFamily((s.gpus||[])[0]||'')]||'#94a3b8';
+  if(!act.length)return '<div class="tbox idle">유휴'+(cap?' · '+cap+'장 할당 가능':' · 할당 가능')+'</div>';
+  act=act.slice().sort(function(a,b){return ((a.end||'9999')<(b.end||'9999'))?-1:1});
+  var boxes=act.map(function(t){
+    var st=taskState(t),txt,cls;
+    if(st==='상시'){txt=t.name+' · 상시';cls='always'}
+    else if(st==='예정'){txt=t.name+' · '+fmtMDg(parseD(t.start))+'~ 예정';cls='plan'}
+    else{
+      var de=dayDiff(parseD(t.end));
+      txt=t.name+' ~'+fmtMDg(parseD(t.end))+(de>=0&&de<=7?(de===0?' (D-DAY)':' (D-'+de+')'):'');
+      cls=(de>=0&&de<=7)?'soon':'run';
+    }
+    var q=t.gpu?chipQty(t.gpu):0;
+    var n=(t.serverUrls&&t.serverUrls.length)||1;
+    var useN=Math.min(n>1?Math.ceil(q/n):q,cap);
+    return '<div class="tbox '+cls+'" title="'+esc(t.gpu||'')+(t.start?' · '+fmtS(t.start)+'~'+fmtS(t.end||''):'')+'"><span class="ttxt">'+esc(txt)+'</span>'+miniBar(useN,cap,col)+'</div>';
+  });
+  var html=boxes.join('');
+  var free=cap-usedCards(s);
+  if(free>0)html+='<div class="tbox free">여유 '+free+'장 · 할당 가능</div>';
+  return html;
+}
+function cardCap(s){return (s.gpus||[]).reduce(function(a,g){return a+chipQty(g)},0)}
+function usedCards(s){
+  var u=0;
+  s.tasks.forEach(function(t){
+    var st=taskState(t);
+    if(st!=='진행'&&st!=='상시')return;
+    if(!t.gpu)return;
+    var q=chipQty(t.gpu);
+    var n=(t.serverUrls&&t.serverUrls.length)||1;
+    u+=n>1?Math.ceil(q/n):q;
+  });
+  return Math.min(u,cardCap(s));
+}
+function gpuBar(s){
+  var cap=cardCap(s);
+  if(!cap)return'';
+  var used=usedCards(s);
+  var col=CHIP_COLORS[chipFamily(s.gpus[0]||'')]||'#94a3b8';
+  var cells='';
+  for(var i=0;i<Math.min(cap,8);i++)cells+='<span class="cell'+(i<used?' on':'')+'"'+(i<used?' style="background:'+col+'"':'')+'></span>';
+  return '<span class="gbar" title="'+esc(s.gpus.join(', '))+' · 사용 '+used+'/'+cap+'장 (다중 서버 공유 작업은 균등 분배 추정)">'+cells+'<span class="gtxt">'+used+'/'+cap+'</span></span>';
+}
+function renderFree(){
+  var idle=servers.filter(function(s){return s.status==='유휴'});
+  var freeNow=0;
+  servers.forEach(function(s){if(s.status!=='셋업')freeNow+=Math.max(cardCap(s)-usedCards(s),0)});
+  var ups=[];
+  tasks.forEach(function(t){
+    if(taskState(t)!=='진행'||!t.end)return;
+    var ids=t.serverUrls.map(function(u){for(var i=0;i<servers.length;i++)if(servers[i].url===u)return servers[i].id;return null}).filter(Boolean);
+    ups.push({end:t.end,ids:ids,cards:t.gpu?chipQty(t.gpu):0,name:t.name});
+  });
+  ups.sort(function(a,b){return a.end<b.end?-1:1});
+  var chips='<span class="fchip now">현재 가용: 유휴 '+idle.length+'대 · 여유 카드 '+freeNow+'장</span>';
+  ups.forEach(function(u){
+    var d=dayDiff(parseD(u.end));
+    chips+='<span class="farrow">→</span><span class="fchip'+((d>=0&&d<=7)?' soon':'')+'"><b>'+fmtS(u.end).slice(5)+'</b> '+esc(u.ids.join(', '))+' +'+u.cards+'장 <span class="fmuted">'+esc(u.name)+(d===0?' · D-DAY':(d>0?' · D-'+d:''))+'</span></span>';
+  });
+  var box=$('#freebox');
+  box.style.display='';
+  box.innerHTML='<h3>🗓️ 가용 현황 & 공석 예정 <span style="font-weight:400;font-size:11px">— 작업 종료 시 반환 예정 카드</span></h3><div class="fchips">'+chips+'</div>';
+}
+
+/* ===================== 필터 ===================== */
+var filt={q:'',mode:'',status:''};
+function loadFilt(){try{var v=JSON.parse(localStorage.getItem(LS_KEY)||'{}');if(v&&typeof v==='object')Object.assign(filt,v)}catch(e){}}
+function saveFilt(){try{localStorage.setItem(LS_KEY,JSON.stringify(filt))}catch(e){}}
+function matches(s){
+  if(filt.mode&&s.mode!==filt.mode)return false;
+  if(filt.status&&s.status!==filt.status)return false;
+  if(filt.q){
+    var q=filt.q.toLowerCase();
+    var hay=[s.id,s.svcIp,s.bmcIp,s.serial,s.model].concat(s.tasks.map(function(t){return t.name})).join(' ').toLowerCase();
+    if(hay.indexOf(q)<0)return false;
+  }
+  return true;
+}
+
+/* ===================== 렌더 ===================== */
+function unitHTML(s){
+  var dim=matches(s)?'':' dim';
+  var sel=s.url===selUrl?' sel':'';
+  var brand=s.vendor.logo||('<span class="vname">'+esc(s.vendor.name)+'</span>');
+  return '<div class="unit '+(s.uSize===4?'u4':'u2')+sel+dim+'" data-url="'+esc(s.url)+'" title="'+esc(s.id)+' — 클릭하여 상세 보기">'+
+    '<span class="vstrip" style="background:'+s.vendor.color+'"></span><span class="vents"></span>'+
+    '<div class="row1"><span class="led '+(LED_CLASS[s.status]||'idle')+'"></span><span class="sid">'+esc(s.id)+'</span><span class="mode">'+esc(s.mode)+'</span></div>'+
+    '<div class="row2">'+brand+gpuBar(s)+'</div>'+
+    '<div class="tasksArea">'+taskBoxes(s)+'</div></div>';
+}
+
+function renderFloors(){
+  var order=['10층','5층'];
+  var floors=order.filter(function(f){return servers.some(function(s){return s.loc===f})});
+  servers.forEach(function(s){if(floors.indexOf(s.loc)<0)floors.push(s.loc)});
+  var html='';
+  if(!servers.length)html='<div class="floor"><h2>데이터 없음</h2><div class="fsub">Notion DB에서 서버 행을 찾지 못했습니다.</div></div>';
+  floors.forEach(function(fl){
+    var fs=servers.filter(function(s){return s.loc===fl});
+    var rackNames=[];
+    fs.forEach(function(s){var rn=s.rack||'미지정';if(rackNames.indexOf(rn)<0)rackNames.push(rn)});
+    rackNames.sort(function(a,b){
+      if((a==='미지정')!==(b==='미지정'))return a==='미지정'?1:-1;
+      return String(a).localeCompare(String(b),undefined,{numeric:true});
+    });
+    var act=fs.filter(function(s){return s.status==='가동'}).length;
+    var racks='';
+    rackNames.forEach(function(rn){
+      var rs=fs.filter(function(s){return (s.rack||'미지정')===rn}).sort(function(a,b){return a.id.localeCompare(b.id,undefined,{numeric:true})});
+      var used=rs.reduce(function(a,s){return a+s.uSize},0);
+      var inner=rs.map(unitHTML).join('');
+      for(var i=0;i<Math.max(RACK_CAP-used,0);i++)inner+='<div class="empty1u" title="빈 슬롯"></div>';
+      racks+='<div class="rackWrap"><div class="rackName">'+(rn==='미지정'?'랙 미지정':'RACK #'+esc(rn))+' · '+rs.length+'대 ('+used+'U/'+RACK_CAP+'U)</div><div class="rack"><div class="rackInner">'+inner+'</div></div></div>';
+    });
+    html+='<div class="floor"><h2>'+esc(fl)+' 서버실</h2><div class="fsub">서버 '+fs.length+'대 · 가동 '+act+'대</div><div class="rackRow">'+racks+'</div></div>';
+  });
+  $('#floors').innerHTML=html;
+  var units=document.querySelectorAll('.unit');
+  for(var i=0;i<units.length;i++){(function(el){
+    el.addEventListener('click',function(){selUrl=el.getAttribute('data-url');renderFloors();renderDetail();});
+  })(units[i])}
+  var m=servers.filter(matches).length;
+  $('#matchInfo').textContent=(filt.q||filt.mode||filt.status)?('필터 일치: '+m+'/'+servers.length+'대'):'';
+}
+
+function renderLegend(){
+  var fams=[];
+  servers.forEach(function(s){s.gpus.forEach(function(g){var f=chipFamily(g);if(fams.indexOf(f)<0)fams.push(f)})});
+  $('#legend').innerHTML='<span><span class="led on"></span>가동 중</span><span><span class="led setup"></span>셋업 중</span><span><span class="led plan"></span>예정</span><span><span class="led idle"></span>유휴</span>'+
+    fams.map(function(f){return '<span><span class="chip" style="background:'+(CHIP_COLORS[f]||'#94a3b8')+'"></span>'+esc(f)+'</span>'}).join('');
+}
+
+function renderDetail(){
+  var s=null;
+  for(var i=0;i<servers.length;i++)if(servers[i].url===selUrl){s=servers[i];break}
+  if(!s){$('#detail').innerHTML='<div class="placeholder">랙에서 서버를 클릭하면<br>상세 정보가 표시됩니다<br><br>🖱️ 아래 표의 행을 클릭해도 됩니다</div>';return}
+  var t='';
+  if(s.tasks.length){
+    t='<div class="dtasks"><h4>이용 현황 ('+s.tasks.length+'건)</h4>'+s.tasks.map(function(x){
+      var st=taskState(x);
+      var period=x.start?(fmtS(x.start)+' ~ '+(x.end?fmtS(x.end):'미정')):'기간 미지정';
+      var cls=(st==='진행'||st==='상시')?'st-가동':(st==='예정'?'st-예정':'st-유휴');
+      return '<div class="dtask"><span class="tn">'+esc(x.name)+'</span><span class="stbadge '+cls+'">'+st+'</span><div class="tp">'+esc(x.gpu)+' · '+period+'</div></div>';
+    }).join('')+'</div>';
+  } else { t='<div class="dtasks"><h4>이용 현황</h4><div class="tp" style="font-size:12px;color:var(--muted)">할당된 작업 없음 (유휴)</div></div>'; }
+  $('#detail').innerHTML='<h3>'+esc(s.id)+'<span class="stbadge st-'+s.status+'">'+s.status+((s.status==='가동'||s.status==='셋업')?' 중':'')+'</span></h3>'+
+    '<div class="dl">'+
+    '<div><dt>위치</dt><dd>'+esc(s.loc)+(s.rack?' / RACK #'+esc(s.rack):' / 랙 미지정')+'</dd></div>'+
+    '<div><dt>모델</dt><dd>'+esc(s.model||'-')+' ('+s.uSize+'U)</dd></div>'+
+    '<div><dt>제조사</dt><dd>'+esc(s.vendor.name)+'</dd></div>'+
+    '<div><dt>GPU/NPU</dt><dd>'+esc(s.gpus.join(', ')||'-')+'</dd></div>'+
+    '<div><dt>카드 사용</dt><dd>'+usedCards(s)+' / '+cardCap(s)+'장</dd></div>'+
+    '<div><dt>운용형태</dt><dd>'+esc(s.mode||'-')+'</dd></div>'+
+    '<div><dt>IP (서비스)</dt><dd>'+esc(s.svcIp||'-')+'</dd></div>'+
+    '<div><dt>IP (BMC)</dt><dd>'+esc(s.bmcIp||'-')+'</dd></div>'+
+    '<div><dt>시리얼</dt><dd>'+esc(s.serial||'-')+'</dd></div>'+
+    '</div>'+t+
+    (s.url?'<a class="nlink" href="'+esc(s.url)+'" target="_blank" rel="noopener">Notion에서 열기 ↗</a>':'');
+}
+
+function renderKpis(){
+  var tot=servers.length;
+  var run=0,setup=0,idle=0,cap=0,used=0,avail=0;
+  servers.forEach(function(s){
+    if(s.status==='가동')run++;else if(s.status==='셋업')setup++;else idle++;
+    cap+=cardCap(s);used+=usedCards(s);
+    if(s.status!=='셋업')avail+=Math.max(cardCap(s)-usedCards(s),0);
+  });
+  var actT=tasks.filter(function(t){var st=taskState(t);return st==='진행'||st==='상시'}).length;
+  $('#kpis').innerHTML=
+    '<div class="kpi"><div class="v">'+tot+'</div><div class="l">총 서버</div></div>'+
+    '<div class="kpi green"><div class="v">'+run+'</div><div class="l">가동 중</div></div>'+
+    '<div class="kpi amber"><div class="v">'+setup+'</div><div class="l">셋업 중</div></div>'+
+    '<div class="kpi gray"><div class="v">'+idle+'</div><div class="l">유휴·예정</div></div>'+
+    '<div class="kpi blue"><div class="v">'+used+'/'+cap+'</div><div class="l">카드 사용/설치</div></div>'+
+    '<div class="kpi teal"><div class="v">'+avail+'</div><div class="l">가용 카드</div></div>'+
+    '<div class="kpi"><div class="v">'+actT+'</div><div class="l">진행 중 작업</div></div>';
+}
+
+function renderSync(){
+  var items=[];
+  tasks.forEach(function(t){
+    var st=taskState(t);
+    var names=t.serverUrls.map(function(u){for(var i=0;i<servers.length;i++)if(servers[i].url===u)return servers[i].id;return null}).filter(Boolean).join(', ');
+    if(t.end){
+      var de=dayDiff(parseD(t.end));
+      if(de>=0&&de<=7&&st!=='예정')items.push('<li><span class="pill end">종료 '+(de===0?'D-DAY':'D-'+de)+'</span><b>'+esc(t.name)+'</b> — '+esc(names)+' ('+fmtS(t.end)+' 종료 → 이후 유휴 전환)</li>');
+      else if(de<0&&de>=-7)items.push('<li><span class="pill info">최근 종료</span><b>'+esc(t.name)+'</b> — '+esc(names)+' ('+fmtS(t.end)+' 종료)</li>');
+    }
+    if(t.start){
+      var ds=dayDiff(parseD(t.start));
+      if(ds<=0&&ds>=-7&&st==='진행')items.push('<li><span class="pill new">신규 시작</span><b>'+esc(t.name)+'</b> — '+esc(names)+' ('+fmtS(t.start)+' 시작)</li>');
+      else if(ds>0&&ds<=7)items.push('<li><span class="pill new">시작 D-'+ds+'</span><b>'+esc(t.name)+'</b> — '+esc(names)+'</li>');
+    }
+  });
+  var noDate=tasks.filter(function(t){return taskState(t)==='상시'}).length;
+  if(noDate)items.push('<li><span class="pill info">참고</span>기간 미지정(상시) 작업 <b>'+noDate+'건</b> — 기간을 입력하면 타임라인에 표시됩니다</li>');
+  var setup=servers.filter(function(s){return s.status==='셋업'}).map(function(s){return s.id});
+  if(setup.length)items.push('<li><span class="pill info">셋업</span>셋업 진행 중: <b>'+esc(setup.join(', '))+'</b></li>');
+  if(items.length){$('#syncbox').style.display='';$('#syncRange').textContent='(오늘 '+fmtDate(today)+' 기준 ±7일 · 데이터 기준: '+dataLabel+')';$('#syncList').innerHTML=items.join('')}
+  else{$('#syncbox').style.display='none'}
+}
+
+function chartFallback(boxId,obj){
+  var rows=Object.keys(obj).map(function(k){return esc(k)+': <b>'+obj[k]+'</b>'}).join('<br>');
+  document.getElementById(boxId).innerHTML='<div class="chartFallback">'+rows+'</div>';
+}
+function renderCharts(){
+  charts.forEach(function(c){try{c.destroy()}catch(e){}});charts=[];
+  var famTotals={},modeTotals={};
+  servers.forEach(function(s){
+    s.gpus.forEach(function(g){var f=chipFamily(g);famTotals[f]=(famTotals[f]||0)+chipQty(g)});
+    if(s.mode)modeTotals[s.mode]=(modeTotals[s.mode]||0)+1;
+  });
+  var floors=[];servers.forEach(function(s){if(floors.indexOf(s.loc)<0)floors.push(s.loc)});
+  var stats=['가동','셋업','예정','유휴'],cols={'가동':'#22c55e','셋업':'#f59e0b','예정':'#3b82f6','유휴':'#cbd5e1'};
+  if(typeof Chart==='undefined'){
+    chartFallback('boxGpu',famTotals);chartFallback('boxMode',modeTotals);
+    var fl={};floors.forEach(function(f){fl[f]=servers.filter(function(s){return s.loc===f}).length+'대'});
+    chartFallback('boxFloor',fl);return;
+  }
+  charts.push(new Chart($('#cGpu'),{type:'doughnut',
+    data:{labels:Object.keys(famTotals),datasets:[{data:Object.keys(famTotals).map(function(k){return famTotals[k]}),backgroundColor:Object.keys(famTotals).map(function(f){return CHIP_COLORS[f]||'#94a3b8'})}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{boxWidth:12,font:{size:11}}}}}}));
+  charts.push(new Chart($('#cMode'),{type:'doughnut',
+    data:{labels:Object.keys(modeTotals),datasets:[{data:Object.keys(modeTotals).map(function(k){return modeTotals[k]}),backgroundColor:Object.keys(modeTotals).map(function(m){return MODE_COLORS[m]||'#94a3b8'})}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{boxWidth:12,font:{size:11}}}}}}));
+  charts.push(new Chart($('#cFloor'),{type:'bar',
+    data:{labels:floors,datasets:stats.map(function(st){return{label:st,data:floors.map(function(f){return servers.filter(function(s){return s.loc===f&&s.status===st}).length}),backgroundColor:cols[st],stack:'a'}})},
+    options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true},y:{stacked:true,ticks:{stepSize:1}}},plugins:{legend:{labels:{boxWidth:12,font:{size:11}}}}}}));
+}
+
+function serverNamesOf(t){
+  return t.serverUrls.map(function(u){for(var i=0;i<servers.length;i++)if(servers[i].url===u)return servers[i].id;return null}).filter(Boolean);
+}
+function renderTasks(){
+  var rows=tasks.slice().sort(function(a,b){return ((a.end||'9999')<(b.end||'9999'))?-1:1});
+  if(!rows.length){$('#taskBody').innerHTML='<tr><td colspan="6" style="color:var(--muted)">등록된 작업이 없습니다</td></tr>';$('#gantt').innerHTML='';return}
+  $('#taskBody').innerHTML=rows.map(function(t){
+    var st=taskState(t);
+    var names=serverNamesOf(t);
+    var dd='-',cls='ok';
+    if(t.end){var d=dayDiff(parseD(t.end));dd=d<0?'종료':(d===0?'D-DAY':'D-'+d);cls=(d>=0&&d<=7)?'warn':'ok'}
+    else if(st==='상시'){dd='상시'}
+    var period=t.start?(fmtS(t.start)+' ~ '+(t.end?fmtS(t.end):'미정')):'미지정';
+    var badge=(st==='진행'||st==='상시')?'st-가동':(st==='예정'?'st-예정':'st-유휴');
+    return '<tr class="trow" data-urls="'+esc(t.serverUrls.join('|'))+'"><td><span class="stbadge '+badge+'" style="margin-left:0">'+st+'</span></td><td><b>'+esc(t.name)+'</b></td><td>'+esc(names.join(', ')||'-')+'</td><td>'+esc(t.gpu)+'</td><td class="mono">'+period+'</td><td class="dday '+cls+'">'+dd+'</td></tr>';
+  }).join('');
+  bindRowClicks('#taskBody tr.trow');
+  // 간트
+  var dated=tasks.filter(function(t){return t.start&&t.end});
+  if(!dated.length){$('#gantt').innerHTML='';return}
+  var min=parseD(dated[0].start),max=parseD(dated[0].end);
+  dated.forEach(function(t){var s=parseD(t.start),e=parseD(t.end);if(s<min)min=s;if(e>max)max=e});
+  if(today<min)min=new Date(today);if(today>max)max=new Date(today);
+  var span=Math.max(max-min,1);
+  function pct(d){return Math.min(100,Math.max(0,(d-min)/span*100))}
+  function fmtMD(d){return String(d.getMonth()+1).padStart(2,'0')+'.'+String(d.getDate()).padStart(2,'0')}
+  var rowsG=dated.slice().sort(function(a,b){return a.start<b.start?-1:1}).map(function(t){
+    var st=taskState(t),cls=st==='진행'?'act':(st==='종료'?'done':'');
+    var l=pct(parseD(t.start)),w=Math.max(pct(parseD(t.end))-l,1.5);
+    var ep=l+w;
+    var de=dayDiff(parseD(t.end));
+    var endCls=(de>=0&&de<=7)?' warn':'';
+    var endTxt='~'+fmtMD(parseD(t.end))+(de>=0&&de<=7?(de===0?' (D-DAY)':' (D-'+de+')'):'');
+    var endLbl='<span class="gEnd'+endCls+'" style="left:'+ep.toFixed(1)+'%;transform:'+(ep>80?'translateX(calc(-100% - 5px))':'translateX(5px)')+'">'+endTxt+'</span>';
+    return '<div class="gRow"><div class="gLabel" title="'+esc(t.name)+'">'+esc(t.name)+'</div><div class="gTrack"><div class="gBar '+cls+'" style="left:'+l.toFixed(1)+'%;width:'+w.toFixed(1)+'%" title="'+fmtS(t.start)+' ~ '+fmtS(t.end)+'"></div>'+endLbl+'</div></div>';
+  }).join('');
+  var spanDays=Math.max(Math.round((max-min)/86400000),1);
+  var stepDays=spanDays<=21?3:(spanDays<=45?7:(spanDays<=100?14:30));
+  var ticks=[];
+  for(var td=new Date(min);td<=max;td=new Date(td.getFullYear(),td.getMonth(),td.getDate()+stepDays))ticks.push(new Date(td));
+  if(ticks.length&&(max-ticks[ticks.length-1])/86400000>=stepDays/2)ticks.push(new Date(max));
+  var axis='';
+  ticks.forEach(function(tk){
+    var p=pct(tk);
+    var shift=p<3?'translateX(0)':(p>97?'translateX(-100%)':'translateX(-50%)');
+    var lf='calc(118px + (100% - 118px) * '+(p/100).toFixed(4)+')';
+    axis+='<span class="gTickLbl" style="left:'+lf+';transform:'+shift+'">'+fmtMD(tk)+'</span>';
+    axis+='<div class="gGrid" style="left:'+lf+'"></div>';
+  });
+  $('#gantt').innerHTML='<h3 style="font-size:12.5px;color:var(--muted);margin-bottom:8px">작업 타임라인 <span style="color:var(--red)">┊ 오늘 '+fmtDate(today)+'</span> · 막대 끝 라벨 = 예상 종료일</h3>'+
+    '<div class="gWrap">'+axis+rowsG+'<div class="todayLine" style="left:calc(118px + (100% - 118px) * '+(pct(today)/100).toFixed(4)+')"></div></div>'+
+    '<div class="gScale"><span>'+fmtDate(min)+'</span><span>'+fmtDate(max)+'</span></div>';
+}
+
+function renderServerTable(){
+  if(!servers.length){$('#serverBody').innerHTML='<tr><td colspan="10" style="color:var(--muted)">서버 데이터가 없습니다</td></tr>';return}
+  var rows=servers.slice().sort(function(a,b){
+    if(a.loc!==b.loc)return a.loc==='10층'?-1:(b.loc==='10층'?1:a.loc.localeCompare(b.loc));
+    return a.id.localeCompare(b.id,undefined,{numeric:true});
+  });
+  $('#serverBody').innerHTML=rows.map(function(s){
+    var act=activeTaskNames(s).join(', ');
+    return '<tr class="trow" data-urls="'+esc(s.url)+'">'+
+      '<td><span class="stbadge st-'+s.status+'" style="margin-left:0">'+s.status+'</span></td>'+
+      '<td class="mono"><b>'+esc(s.id)+'</b></td>'+
+      '<td>'+esc(s.loc)+(s.rack?' / #'+esc(s.rack):'')+'</td>'+
+      '<td>'+esc(s.model||'-')+'</td>'+
+      '<td>'+esc(s.gpus.join(', ')||'-')+'</td>'+
+      '<td class="mono">'+usedCards(s)+'/'+cardCap(s)+'</td>'+
+      '<td>'+esc(s.mode||'-')+'</td>'+
+      '<td class="mono">'+esc(s.svcIp||'-')+'</td>'+
+      '<td class="mono">'+esc(s.bmcIp||'-')+'</td>'+
+      '<td class="mono">'+esc(s.serial||'-')+'</td>'+
+      '<td>'+esc(act||'-')+'</td></tr>';
+  }).join('');
+  bindRowClicks('#serverBody tr.trow');
+}
+function bindRowClicks(sel){
+  var trs=document.querySelectorAll(sel);
+  for(var i=0;i<trs.length;i++){(function(tr){
+    tr.addEventListener('click',function(){
+      var first=(tr.getAttribute('data-urls')||'').split('|')[0];
+      if(first){selUrl=first;renderFloors();renderDetail();window.scrollTo({top:0,behavior:'smooth'})}
+    });
+  })(trs[i])}
+}
+
+function renderAll(){
+  safe('kpis',renderKpis);
+  safe('sync',renderSync);
+  safe('free',renderFree);
+  safe('legend',renderLegend);
+  safe('floors',renderFloors);
+  safe('detail',renderDetail);
+  safe('charts',renderCharts);
+  safe('tasks',renderTasks);
+  safe('serverTable',renderServerTable);
+}
+
+function setBadge(kind,text){
+  var b=$('#srcBadge');b.className='srcBadge '+kind;b.textContent=text;
+}
+
+function bindFilters(){
+  var fq=$('#fQ'),fm=$('#fMode'),fs=$('#fStatus');
+  var modes=[];servers.forEach(function(s){if(s.mode&&modes.indexOf(s.mode)<0)modes.push(s.mode)});
+  fm.innerHTML='<option value="">운용형태: 전체</option>'+modes.map(function(m){return '<option'+(filt.mode===m?' selected':'')+'>'+esc(m)+'</option>'}).join('');
+  fq.value=filt.q;fs.value=filt.status;
+  function apply(){filt={q:fq.value.trim(),mode:fm.value,status:fs.value};saveFilt();renderFloors()}
+  fq.addEventListener('input',apply);
+  fm.addEventListener('change',apply);
+  fs.addEventListener('change',apply);
+  $('#fReset').addEventListener('click',function(){fq.value='';fm.value='';fs.value='';apply()});
+}
+
+/* ===================== 초기화 ===================== */
+function init(){
+  loadFilt();
+  // 1단계: 스냅샷으로 즉시 렌더 (항상 데이터가 보이도록)
+  buildData(SNAPSHOT.servers,SNAPSHOT.usage);
+  dataLabel=SNAPSHOT_AT+' 스냅샷';
+  bindFilters();
+  renderAll();
+  setBadge('snap','스냅샷 '+SNAPSHOT_AT);
+  $('#updatedAt').textContent='Notion 실시간 조회 중…';
+  $('#srcNote').innerHTML='데이터 출처: Notion 문서 「전사 서버 운용 현황」 · 기준 시각 '+SNAPSHOT_AT+'<br>사내 공유용 — 보안상 IP 마지막 옥텟과 시리얼은 마스킹되어 있습니다. GitHub Actions로 매일 09시/14시 자동 갱신.';
+  // 2단계: 라이브 조회 → 성공 시 교체
+  var btn0=$('#btnRefresh');
+  if(btn0)btn0.addEventListener('click',loadLive);
+  loadLive();
+}
+function loadLive(){
+  var btn=$('#btnRefresh');
+  if(true){ /* 공개 배포본: 항상 스냅샷 표시 */
+    if(btn)btn.style.display='none';
+    setBadge('live','기준 '+SNAPSHOT_AT);
+    $('#updatedAt').textContent='공개 배포본 · 매일 09시/14시 자동 갱신 (GitHub Actions)';
+    return;
+  }
+  if(btn){btn.disabled=true;btn.textContent='⏳ 조회 중…'}
+  setBadge('loading','조회 중…');
+  queryAll(SERVERS_VIEW).then(function(a){
+    return queryAll(USAGE_VIEW).then(function(b){return [a,b]});
+  }).then(function(res){
+    var fixed=fixSwap(res[0],res[1]);
+    var srows=fixed[0],urows=fixed[1];
+    if(!srows.length)throw new Error('운용 서버 현황 DB에서 0건이 반환되었습니다');
+    if(!srows.some(function(r){return r&&('서버 ID' in r)}))throw new Error('서버 DB 응답에 "서버 ID" 필드가 없습니다 (응답 형식 확인 필요)');
+    var keepSel=selUrl;
+    buildData(srows,urows);
+    selUrl=keepSel;
+    dataLabel=new Date().toLocaleString('ko-KR')+' 실시간';
+    bindFilters();
+    renderAll();
+    setBadge('live','실시간');
+    $('#updatedAt').textContent='Notion에서 '+new Date().toLocaleString('ko-KR')+' 로드 · 서버 '+srows.length+'대 · 작업 '+urows.length+'건';
+    $('#liveWarn').style.display='none';
+  }).catch(function(e){
+    setBadge('snap',dataLabel||('스냅샷 '+SNAPSHOT_AT));
+    $('#updatedAt').textContent='실시간 조회 실패 → 직전 데이터 표시 중';
+    var w=$('#liveWarn');w.style.display='block';
+    w.innerHTML='⚠️ <b>Notion 실시간 조회에 실패해 직전 데이터를 표시하고 있습니다.</b><br>사유: '+esc((e&&e.message)||e)+'<br>🔄 새로고침 버튼으로 다시 시도하거나, 설정에서 Notion 커넥터 연결 상태를 확인해 주세요.';
+  }).then(function(){
+    if(btn){btn.disabled=false;btn.textContent='🔄 새로고침'}
+  });
+}
+
+/* 테스트 훅: 브라우저 외 환경(Node)에서 로직 검증용 */
+if(typeof document==='undefined'){
+  globalThis.__test={SNAPSHOT:SNAPSHOT,buildData:buildData,taskState:taskState,serverStatus:serverStatus,
+    jarr:jarr,parseD:parseD,chipFamily:chipFamily,chipQty:chipQty,unwrap:unwrap,fixSwap:fixSwap,taskBoxes:taskBoxes,gpuBar:gpuBar,usedCards:usedCards,cardCap:cardCap,
+    servers:function(){return servers},tasks:function(){return tasks}};
+}else{
+  init();
+}
+})();
+
+</script>
+</body>
+</html>
