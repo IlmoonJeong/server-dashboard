@@ -1,5 +1,18 @@
 <!DOCTYPE html>
-<!-- v2: snapshot fallback + robust unwrap + QA fixes -->
+<script type="application/json" id="cowork-artifact-meta">
+{
+  "name": "Server Rack Dashboard",
+  "schemaVersion": 1,
+  "description": "Notion 「전사 서버 운용 현황」의 두 DB(운용 서버 현황·서버 사용 현황)를 실시간 조회해 10층/5층 서버 랙 시각화 + 운용 대시보드를 표시. 라이브 조회 실패 시 2026-06-12 스냅샷으로 자동 대체 표시.",
+  "mcpTools": [
+    "mcp__c82c6377-21ea-4255-ba2f-0b4aabfeca9f__notion-query-database-view"
+  ],
+  "mcpServerNames": [
+    "Notion"
+  ]
+}
+</script>
+<!-- v3 (2026-06-16): CA25 chip color + Driver/OS/SDK columns + 2026-06-16 snapshot refresh + end-less task fix -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -232,7 +245,7 @@ footer{margin-top:18px;font-size:11px;color:var(--muted);text-align:center;line-
   <div class="tableCard">
     <h2>📋 전체 서버 목록</h2>
     <table>
-      <thead><tr><th>상태</th><th>서버 ID</th><th>위치/랙</th><th>모델</th><th>GPU/NPU</th><th>카드</th><th>운용형태</th><th>IP(서비스)</th><th>IP(BMC)</th><th>시리얼</th><th>현재 작업</th></tr></thead>
+      <thead><tr><th>상태</th><th>서버 ID</th><th>위치/랙</th><th>모델</th><th>GPU/NPU</th><th>카드</th><th>운용형태</th><th>IP(서비스)</th><th>IP(BMC)</th><th>시리얼</th><th>Driver</th><th>OS</th><th>SDK</th><th>현재 작업</th></tr></thead>
       <tbody id="serverBody"></tbody>
     </table>
   </div>
@@ -241,7 +254,6 @@ footer{margin-top:18px;font-size:11px;color:var(--muted);text-align:center;line-
 <footer id="srcNote"></footer>
 
 <script>
-
 (function(){
 "use strict";
 /* ===================== 상수 ===================== */
@@ -256,13 +268,13 @@ GB:{name:'GIGABYTE',color:'#f97316',logo:'<svg class="vlogo" viewBox="0 0 76 14"
 DE:{name:'DELL',color:'#14b8a6',logo:'<svg class="vlogo" viewBox="0 0 48 14" height="12" xmlns="http://www.w3.org/2000/svg"><circle cx="7" cy="7" r="6.3" fill="none" stroke="#41b6e6" stroke-width="1.4"/><text x="7" y="9.3" font-family="Arial" font-size="4.6" font-weight="bold" fill="#41b6e6" text-anchor="middle" letter-spacing=".3">DELL</text><text x="17" y="11" font-family="Arial" font-size="9.5" font-weight="bold" fill="#41b6e6" letter-spacing="1">DELL</text></svg>'}
 };
 var MODEL_U={'AS-4125GS-TNRT2(4U)':4,'G494-ZB4-AAP2':4,'XE7745':4,'R7525':2};
-var CHIP_COLORS={'H100':'#ef4444','ATOM MAX':'#a3a3a3','NPU':'#a855f7','RTX-PRO6000':'#3b82f6','A100-40G':'#eab308'};
+var CHIP_COLORS={'H100':'#ef4444','CA25':'#a855f7','ATOM MAX':'#a3a3a3','NPU':'#a855f7','RTX-PRO6000':'#3b82f6','A100-40G':'#eab308','A100':'#eab308'};
 var MODE_COLORS={'Baremetal':'#8b5cf6','VM':'#f97316','Fractos 1.0':'#a16207','Fractos 2.0':'#16a34a'};
 var LED_CLASS={'가동':'on','셋업':'setup','예정':'plan','유휴':'idle'};
 
-/* ============ 스냅샷 (2026-06-12 Notion 조회분 — 라이브 조회 실패 시 표시) ============ */
-var SNAPSHOT_AT='2026-06-16 04:34 KST';
-var SNAPSHOT={servers:[{"서버 ID": "DE4RTX6000-8-12", "url": "https://app.notion.com/p/37d888f36d5180db87a5e5b4ecee49c1", "위치": "10층", "서버 모델": "XE7745", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "8NZ••••", "구성 GPU/NPU": "[\"RTX-PRO6000 8장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d518092a325e18ea7b664e5\"]"}, {"서버 ID": "DE4RTX6000-8-11", "url": "https://app.notion.com/p/37d888f36d51809194f0e8ae117c8577", "위치": "10층", "서버 모델": "XE7745", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "6NZ••••", "구성 GPU/NPU": "[\"RTX-PRO6000 8장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d518070be03cf8d89b6e4fe\"]"}, {"서버 ID": "DE2A100-2-10", "url": "https://app.notion.com/p/37d888f36d51803ca45ac651b16c9849", "위치": "10층", "서버 모델": "R7525", "운용형태": "VM", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "5S2••••", "구성 GPU/NPU": "[\"A100-40G 2장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d51808bb500c2fbc0a12464\"]"}, {"서버 ID": "DE2A100-2-09", "url": "https://app.notion.com/p/37d888f36d51808d8879fca630df99c2", "위치": "10층", "서버 모델": "R7525", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "6S2••••", "구성 GPU/NPU": "[\"A100-40G 2장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d518060a117fd1e4efaa9b8\"]"}, {"서버 ID": "GB2ATOM-4-08", "url": "https://app.notion.com/p/37d888f36d51801fb8efef9719ccf922", "위치": "10층", "랙 넘버": "4", "서버 모델": "G494-ZB4-AAP2", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "GPG••••", "구성 GPU/NPU": "[\"CA25 4장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d51807aa046f4d84c775314\"]"}, {"서버 ID": "SM4ATOM-8-07", "url": "https://app.notion.com/p/37d888f36d5180a2b7fdf2f73ab8432b", "위치": "10층", "랙 넘버": "2", "서버 모델": "AS-4125GS-TNRT2(4U)", "운용형태": "VM", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "A50••••", "구성 GPU/NPU": "[\"CA25 8장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d51808d8e18cdd1047e9e80\"]"}, {"서버 ID": "SM4ATOM-4-06", "url": "https://app.notion.com/p/37d888f36d51800ca914dd9ec1ad147e", "위치": "10층", "랙 넘버": "2", "서버 모델": "AS-4125GS-TNRT2(4U)", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "A50••••", "구성 GPU/NPU": "[\"CA25 8장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d518001bf86fbb6f8fde9ac\"]"}, {"서버 ID": "GB2ATOM-2-05", "url": "https://app.notion.com/p/37d888f36d518095ae60d68bfa09dc39", "위치": "10층", "랙 넘버": "2", "서버 모델": "G494-ZB4-AAP2", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "셋업 중", "구성 GPU/NPU": "[\"CA25 2장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d518064be2ee21dad01adcb\"]"}, {"서버 ID": "SM4ATOM-4-04", "url": "https://app.notion.com/p/37d888f36d518086829ce024d4bd4897", "위치": "5층", "서버 모델": "AS-4125GS-TNRT2(4U)", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.170.xx", "IP 주소(BMC)": "192.168.170.xx", "서버 시리얼": "A50••••", "구성 GPU/NPU": "[\"CA25 4장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d5180479b36d3c3798f2ee7\"]"}, {"서버 ID": "SM4ATOM-4-03", "url": "https://app.notion.com/p/37d888f36d5180458b2fead57ec8e875", "위치": "5층", "서버 모델": "AS-4125GS-TNRT2(4U)", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.170.xx", "IP 주소(BMC)": "192.168.170.xx", "서버 시리얼": "A50••••", "구성 GPU/NPU": "[\"CA25 4장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d51804b8407c0b944131fdc\"]"}, {"서버 ID": "SM4ATOM-4-02", "url": "https://app.notion.com/p/37d888f36d5180e190adf902725417c9", "위치": "5층", "서버 모델": "AS-4125GS-TNRT2(4U)", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.170.xx", "IP 주소(BMC)": "192.168.170.xx", "서버 시리얼": "A50••••", "구성 GPU/NPU": "[\"CA25 4장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d5180a28cc8c5e80c982420\"]"}, {"서버 ID": "SM4ATOM-4-01", "url": "https://app.notion.com/p/37d888f36d5180efbc92cb5599bfb545", "위치": "5층", "서버 모델": "AS-4125GS-TNRT2(4U)", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.170.xx", "IP 주소(BMC)": "192.168.170.xx", "서버 시리얼": "A50••••", "구성 GPU/NPU": "[\"CA25 4장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d5180b5bdbcfecdaadc86d2\"]"}],usage:[{"작업": "Infra 테스트 4", "url": "https://app.notion.com/p/37d888f36d518070be03cf8d89b6e4fe", "운용 서버": "[\"https://app.notion.com/p/37d888f36d51809194f0e8ae117c8577\"]", "활용 GPU/NPU": "RTX-PRO600 8장"}, {"작업": "Infra 테스트 3", "url": "https://app.notion.com/p/37d888f36d51808bb500c2fbc0a12464", "운용 서버": "[\"https://app.notion.com/p/37d888f36d51803ca45ac651b16c9849\"]", "활용 GPU/NPU": "A100 2장"}, {"작업": "Infra 테스트 2", "url": "https://app.notion.com/p/37d888f36d518060a117fd1e4efaa9b8", "운용 서버": "[\"https://app.notion.com/p/37d888f36d51808d8879fca630df99c2\"]", "활용 GPU/NPU": "A100 2장"}, {"작업": "Infra 테스트 1", "url": "https://app.notion.com/p/37d888f36d51808d8e18cdd1047e9e80", "운용 서버": "[\"https://app.notion.com/p/37d888f36d5180a2b7fdf2f73ab8432b\"]", "활용 GPU/NPU": "CA25  8장"}, {"작업": "Fractos NPU Test", "url": "https://app.notion.com/p/37d888f36d518001bf86fbb6f8fde9ac", "운용 서버": "[\"https://app.notion.com/p/37d888f36d51800ca914dd9ec1ad147e\"]", "활용 GPU/NPU": "CA25  8장", "date:사용 기간:start": "2026-06-15"}, {"작업": "Infra 테스트 5", "url": "https://app.notion.com/p/37d888f36d518092a325e18ea7b664e5", "운용 서버": "[\"https://app.notion.com/p/37d888f36d5180db87a5e5b4ecee49c1\"]", "활용 GPU/NPU": "RTX-PRO600 8장"}, {"작업": "S/W 테스트 2", "url": "https://app.notion.com/p/37d888f36d518064be2ee21dad01adcb", "운용 서버": "[\"https://app.notion.com/p/37d888f36d518095ae60d68bfa09dc39\"]", "활용 GPU/NPU": "CA25  2장"}, {"작업": "S/W 테스트 1", "url": "https://app.notion.com/p/37d888f36d51804b8407c0b944131fdc", "운용 서버": "[\"https://app.notion.com/p/37d888f36d5180458b2fead57ec8e875\"]", "활용 GPU/NPU": "CA25 4장"}, {"작업": "뱀부스 PoC", "url": "https://app.notion.com/p/37d888f36d51807aa046f4d84c775314", "운용 서버": "[\"https://app.notion.com/p/37d888f36d51801fb8efef9719ccf922\"]", "활용 GPU/NPU": "CA25 4장", "date:사용 기간:start": "2026-06-12", "date:사용 기간:end": "2026-06-26"}, {"작업": "다누시스 PoC", "url": "https://app.notion.com/p/37d888f36d5180a28cc8c5e80c982420", "운용 서버": "[\"https://app.notion.com/p/37d888f36d5180e190adf902725417c9\"]", "활용 GPU/NPU": "CA25 4장", "date:사용 기간:start": "2026-06-02", "date:사용 기간:end": "2026-06-16"}, {"작업": "시즐 PoC", "url": "https://app.notion.com/p/37d888f36d5180479b36d3c3798f2ee7", "운용 서버": "[\"https://app.notion.com/p/37d888f36d518086829ce024d4bd4897\"]", "활용 GPU/NPU": "CA25 4장", "date:사용 기간:start": "2026-05-06", "date:사용 기간:end": "2026-07-01"}, {"작업": "디딤 PoC", "url": "https://app.notion.com/p/37d888f36d51806dbdffdab6495610b7", "운용 서버": "[]", "활용 GPU/NPU": "CA25 4장", "date:사용 기간:start": "2026-05-18", "date:사용 기간:end": "2026-06-12"}, {"작업": "클러쉬 PoC", "url": "https://app.notion.com/p/37d888f36d5180b5bdbcfecdaadc86d2", "운용 서버": "[\"https://app.notion.com/p/37d888f36d5180efbc92cb5599bfb545\"]", "활용 GPU/NPU": "CA25 4장", "date:사용 기간:start": "2026-06-02", "date:사용 기간:end": "2026-07-14"}]};
+/* ============ 스냅샷 (2026-06-16 Notion 조회분 — 라이브 조회 실패 시 표시) ============ */
+var SNAPSHOT_AT='2026-06-16 11:39 KST';
+var SNAPSHOT={servers:[{"서버 ID": "DE4RTX6000-7-12", "url": "https://app.notion.com/p/37d888f36d5180db87a5e5b4ecee49c1", "위치": "10층", "서버 모델": "XE7745", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "8NZ••••", "구성 GPU/NPU": "[\"RTX-PRO6000 7장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d518092a325e18ea7b664e5\"]"}, {"서버 ID": "DE4RTX6000-8-11", "url": "https://app.notion.com/p/37d888f36d51809194f0e8ae117c8577", "위치": "10층", "서버 모델": "XE7745", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "6NZ••••", "구성 GPU/NPU": "[\"RTX-PRO6000 8장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d518070be03cf8d89b6e4fe\"]"}, {"서버 ID": "DE2A100-2-10", "url": "https://app.notion.com/p/37d888f36d51803ca45ac651b16c9849", "위치": "10층", "서버 모델": "R7525", "운용형태": "VM", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "5S2••••", "구성 GPU/NPU": "[\"A100-40G 2장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d51808bb500c2fbc0a12464\"]"}, {"서버 ID": "DE2A100-2-09", "url": "https://app.notion.com/p/37d888f36d51808d8879fca630df99c2", "위치": "10층", "서버 모델": "R7525", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "6S2••••", "구성 GPU/NPU": "[\"A100-40G 2장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d518060a117fd1e4efaa9b8\"]"}, {"서버 ID": "GB2ATOM-4-08", "url": "https://app.notion.com/p/37d888f36d51801fb8efef9719ccf922", "위치": "10층", "랙 넘버": "4", "서버 모델": "G494-ZB4-AAP2", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "GPG••••", "구성 GPU/NPU": "[\"CA25 4장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d51807aa046f4d84c775314\"]"}, {"서버 ID": "SM4ATOM-8-07", "url": "https://app.notion.com/p/37d888f36d5180a2b7fdf2f73ab8432b", "위치": "10층", "랙 넘버": "2", "서버 모델": "AS-4125GS-TNRT2(4U)", "운용형태": "VM", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "A50••••", "구성 GPU/NPU": "[\"CA25 8장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d51808d8e18cdd1047e9e80\"]"}, {"서버 ID": "SM4ATOM-8-06", "url": "https://app.notion.com/p/37d888f36d51800ca914dd9ec1ad147e", "위치": "10층", "랙 넘버": "2", "서버 모델": "AS-4125GS-TNRT2(4U)", "운용형태": "Fractos 1.0", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "A50••••", "구성 GPU/NPU": "[\"CA25 8장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d518001bf86fbb6f8fde9ac\"]"}, {"서버 ID": "GB2ATOM-2-05", "url": "https://app.notion.com/p/37d888f36d518095ae60d68bfa09dc39", "위치": "10층", "랙 넘버": "2", "서버 모델": "G494-ZB4-AAP2", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.160.xx", "IP 주소(BMC)": "192.168.160.xx", "서버 시리얼": "셋업 중", "구성 GPU/NPU": "[\"CA25 2장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d518064be2ee21dad01adcb\"]"}, {"서버 ID": "SM4ATOM-4-04", "url": "https://app.notion.com/p/37d888f36d518086829ce024d4bd4897", "위치": "5층", "서버 모델": "AS-4125GS-TNRT2(4U)", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.170.xx", "IP 주소(BMC)": "192.168.170.xx", "서버 시리얼": "A50••••", "구성 GPU/NPU": "[\"CA25 4장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d5180479b36d3c3798f2ee7\"]"}, {"서버 ID": "SM4ATOM-4-03", "url": "https://app.notion.com/p/37d888f36d5180458b2fead57ec8e875", "위치": "5층", "서버 모델": "AS-4125GS-TNRT2(4U)", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.170.xx", "IP 주소(BMC)": "192.168.170.xx", "서버 시리얼": "A50••••", "구성 GPU/NPU": "[\"CA25 4장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d51804b8407c0b944131fdc\"]"}, {"서버 ID": "SM4ATOM-4-02", "url": "https://app.notion.com/p/37d888f36d5180e190adf902725417c9", "위치": "5층", "서버 모델": "AS-4125GS-TNRT2(4U)", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.170.xx", "IP 주소(BMC)": "192.168.170.xx", "서버 시리얼": "A50••••", "구성 GPU/NPU": "[\"CA25 4장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d5180a28cc8c5e80c982420\"]"}, {"서버 ID": "SM4ATOM-4-01", "url": "https://app.notion.com/p/37d888f36d5180efbc92cb5599bfb545", "위치": "5층", "서버 모델": "AS-4125GS-TNRT2(4U)", "운용형태": "Baremetal", "IP 주소(서비스)": "192.168.170.xx", "IP 주소(BMC)": "192.168.170.xx", "서버 시리얼": "A50••••", "구성 GPU/NPU": "[\"CA25 4장\"]", "이용 현황": "[\"https://app.notion.com/p/37d888f36d5180b5bdbcfecdaadc86d2\"]"}],usage:[{"작업": "Infra 테스트 4", "url": "https://app.notion.com/p/37d888f36d518070be03cf8d89b6e4fe", "운용 서버": "[\"https://app.notion.com/p/37d888f36d51809194f0e8ae117c8577\"]", "활용 GPU/NPU": "RTX-PRO600 8장"}, {"작업": "Infra 테스트 3", "url": "https://app.notion.com/p/37d888f36d51808bb500c2fbc0a12464", "운용 서버": "[\"https://app.notion.com/p/37d888f36d51803ca45ac651b16c9849\"]", "활용 GPU/NPU": "A100 2장"}, {"작업": "Infra 테스트 2", "url": "https://app.notion.com/p/37d888f36d518060a117fd1e4efaa9b8", "운용 서버": "[\"https://app.notion.com/p/37d888f36d51808d8879fca630df99c2\"]", "활용 GPU/NPU": "A100 2장"}, {"작업": "Infra 테스트 1", "url": "https://app.notion.com/p/37d888f36d51808d8e18cdd1047e9e80", "운용 서버": "[\"https://app.notion.com/p/37d888f36d5180a2b7fdf2f73ab8432b\"]", "활용 GPU/NPU": "CA25  8장"}, {"작업": "Fractos NPU Test", "url": "https://app.notion.com/p/37d888f36d518001bf86fbb6f8fde9ac", "운용 서버": "[\"https://app.notion.com/p/37d888f36d51800ca914dd9ec1ad147e\"]", "활용 GPU/NPU": "CA25  8장", "date:사용 기간:start": "2026-06-15"}, {"작업": "Infra 테스트 5", "url": "https://app.notion.com/p/37d888f36d518092a325e18ea7b664e5", "운용 서버": "[\"https://app.notion.com/p/37d888f36d5180db87a5e5b4ecee49c1\"]", "활용 GPU/NPU": "RTX-PRO600 8장"}, {"작업": "S/W 테스트 2", "url": "https://app.notion.com/p/37d888f36d518064be2ee21dad01adcb", "운용 서버": "[\"https://app.notion.com/p/37d888f36d518095ae60d68bfa09dc39\"]", "활용 GPU/NPU": "CA25  2장"}, {"작업": "S/W 테스트 1", "url": "https://app.notion.com/p/37d888f36d51804b8407c0b944131fdc", "운용 서버": "[\"https://app.notion.com/p/37d888f36d5180458b2fead57ec8e875\"]", "활용 GPU/NPU": "CA25 4장"}, {"작업": "뱀부스 PoC", "url": "https://app.notion.com/p/37d888f36d51807aa046f4d84c775314", "운용 서버": "[\"https://app.notion.com/p/37d888f36d51801fb8efef9719ccf922\"]", "활용 GPU/NPU": "CA25 4장", "date:사용 기간:start": "2026-06-12", "date:사용 기간:end": "2026-06-26"}, {"작업": "다누시스 PoC", "url": "https://app.notion.com/p/37d888f36d5180a28cc8c5e80c982420", "운용 서버": "[\"https://app.notion.com/p/37d888f36d5180e190adf902725417c9\"]", "활용 GPU/NPU": "CA25 4장", "date:사용 기간:start": "2026-06-02", "date:사용 기간:end": "2026-06-16"}, {"작업": "시즐 PoC", "url": "https://app.notion.com/p/37d888f36d5180479b36d3c3798f2ee7", "운용 서버": "[\"https://app.notion.com/p/37d888f36d518086829ce024d4bd4897\"]", "활용 GPU/NPU": "CA25 4장", "date:사용 기간:start": "2026-05-06", "date:사용 기간:end": "2026-07-01"}, {"작업": "디딤 PoC", "url": "https://app.notion.com/p/37d888f36d51806dbdffdab6495610b7", "운용 서버": "[]", "활용 GPU/NPU": "CA25 4장", "date:사용 기간:start": "2026-05-18", "date:사용 기간:end": "2026-06-12"}, {"작업": "클러쉬 PoC", "url": "https://app.notion.com/p/37d888f36d5180b5bdbcfecdaadc86d2", "운용 서버": "[\"https://app.notion.com/p/37d888f36d5180efbc92cb5599bfb545\"]", "활용 GPU/NPU": "CA25 4장", "date:사용 기간:start": "2026-06-02", "date:사용 기간:end": "2026-07-14"}]};
 
 /* ===================== 유틸 ===================== */
 function $(s){return document.querySelector(s)}
@@ -321,7 +333,7 @@ function queryAll(viewUrl){
   return step();
 }
 
-/* 응답 스와프 방어: 호출 순서를 신뢰하지 않고 행의 실제 키로 서버/작업 데이터를 식별 */
+/* 응답 스왑 방어: 호출 순서를 신뢰하지 않고 행의 실제 키로 서버/작업 데이터를 식별 */
 function fixSwap(a,b){
   function isSrv(rows){return (rows||[]).some(function(r){return r&&('서버 ID' in r)})}
   if(!isSrv(a)&&isSrv(b))return [b,a];
@@ -359,6 +371,7 @@ function buildData(srows,urows){
     model:r['서버 모델']||'',loc:r['위치']||'기타',rack:r['랙 넘버']||null,
     svcIp:r['IP 주소(서비스)']||'',bmcIp:r['IP 주소(BMC)']||'',
     serial:r['서버 시리얼']||'',mode:r['운용형태']||'',
+    drv:r['Driver Ver.']||'',os:r['OS&Ver.']||'',sdk:r['SDK Ver.']||'',
     gpus:jarr(r['구성 GPU/NPU']),tasks:[]
   }});
   var byUrl={};
@@ -374,12 +387,14 @@ function activeTaskNames(s){
   return s.tasks.filter(function(t){var st=taskState(t);return st==='진행'||st==='상시'}).map(function(t){return t.name});
 }
 function fmtMDg(d){return String(d.getMonth()+1).padStart(2,'0')+'.'+String(d.getDate()).padStart(2,'0')}
+/* 작업 인박스용 미니 배터리 (해당 작업이 쓰는 카드 수 / 서버 설치 수) */
 function miniBar(usedN,cap,col){
   if(!cap)return'';
   var c='';
   for(var i=0;i<Math.min(cap,8);i++)c+='<span class="mcell'+(i<usedN?' on':'')+'"'+(i<usedN?' style="background:'+col+'"':'')+'></span>';
   return '<span class="mbar" title="이 작업 사용 '+usedN+'/'+cap+'장">'+c+'<span class="mtxt">'+usedN+'/'+cap+'</span></span>';
 }
+/* 서버 유닛 내부에 표시할 작업 박스 (종료된 작업 제외, 종료 임박순 정렬) */
 function taskBoxes(s){
   var act=s.tasks.filter(function(t){return taskState(t)!=='종료'});
   var cap=cardCap(s);
@@ -390,6 +405,7 @@ function taskBoxes(s){
     var st=taskState(t),txt,cls;
     if(st==='상시'){txt=t.name+' · 상시';cls='always'}
     else if(st==='예정'){txt=t.name+' · '+fmtMDg(parseD(t.start))+'~ 예정';cls='plan'}
+    else if(!t.end){txt=t.name+' · 진행 중';cls='run'}
     else{
       var de=dayDiff(parseD(t.end));
       txt=t.name+' ~'+fmtMDg(parseD(t.end))+(de>=0&&de<=7?(de===0?' (D-DAY)':' (D-'+de+')'):'');
@@ -406,6 +422,7 @@ function taskBoxes(s){
   return html;
 }
 function cardCap(s){return (s.gpus||[]).reduce(function(a,g){return a+chipQty(g)},0)}
+/* 활성 작업이 점유 중인 카드 수 (다중 서버 공유 작업은 서버 수로 균등 분배 추정) */
 function usedCards(s){
   var u=0;
   s.tasks.forEach(function(t){
@@ -418,6 +435,7 @@ function usedCards(s){
   });
   return Math.min(u,cardCap(s));
 }
+/* 설치 카드 수 대비 사용량 배터리 바 */
 function gpuBar(s){
   var cap=cardCap(s);
   if(!cap)return'';
@@ -427,6 +445,7 @@ function gpuBar(s){
   for(var i=0;i<Math.min(cap,8);i++)cells+='<span class="cell'+(i<used?' on':'')+'"'+(i<used?' style="background:'+col+'"':'')+'></span>';
   return '<span class="gbar" title="'+esc(s.gpus.join(', '))+' · 사용 '+used+'/'+cap+'장 (다중 서버 공유 작업은 균등 분배 추정)">'+cells+'<span class="gtxt">'+used+'/'+cap+'</span></span>';
 }
+/* 가용 현황 & 공석 예정 스트립 */
 function renderFree(){
   var idle=servers.filter(function(s){return s.status==='유휴'});
   var freeNow=0;
@@ -513,7 +532,8 @@ function renderLegend(){
   var fams=[];
   servers.forEach(function(s){s.gpus.forEach(function(g){var f=chipFamily(g);if(fams.indexOf(f)<0)fams.push(f)})});
   $('#legend').innerHTML='<span><span class="led on"></span>가동 중</span><span><span class="led setup"></span>셋업 중</span><span><span class="led plan"></span>예정</span><span><span class="led idle"></span>유휴</span>'+
-    fams.map(function(f){return '<span><span class="chip" style="background:'+(CHIP_COLORS[f]||'#94a3b8')+'"></span>'+esc(f)+'</span>'}).join('');
+    fams.map(function(f){return '<span><span class="chip" style="background:'+(CHIP_COLORS[f]||'#94a3b8')+'"></span>'+esc(f)+'</span>'}).join('')+
+    '<span style="opacity:.4">|</span><span>작업박스:</span><span><span class="chip" style="background:#22c55e"></span>진행</span><span><span class="chip" style="background:#ef4444"></span>7일 내 종료</span><span><span class="chip" style="background:#3b82f6"></span>예정</span><span><span class="chip" style="background:#94a3b8"></span>상시</span>';
 }
 
 function renderDetail(){
@@ -540,6 +560,9 @@ function renderDetail(){
     '<div><dt>IP (서비스)</dt><dd>'+esc(s.svcIp||'-')+'</dd></div>'+
     '<div><dt>IP (BMC)</dt><dd>'+esc(s.bmcIp||'-')+'</dd></div>'+
     '<div><dt>시리얼</dt><dd>'+esc(s.serial||'-')+'</dd></div>'+
+    '<div><dt>Driver Ver.</dt><dd>'+esc(s.drv||'-')+'</dd></div>'+
+    '<div><dt>OS &amp; Ver.</dt><dd>'+esc(s.os||'-')+'</dd></div>'+
+    '<div><dt>SDK Ver.</dt><dd>'+esc(s.sdk||'-')+'</dd></div>'+
     '</div>'+t+
     (s.url?'<a class="nlink" href="'+esc(s.url)+'" target="_blank" rel="noopener">Notion에서 열기 ↗</a>':'');
 }
@@ -559,7 +582,7 @@ function renderKpis(){
     '<div class="kpi amber"><div class="v">'+setup+'</div><div class="l">셋업 중</div></div>'+
     '<div class="kpi gray"><div class="v">'+idle+'</div><div class="l">유휴·예정</div></div>'+
     '<div class="kpi blue"><div class="v">'+used+'/'+cap+'</div><div class="l">카드 사용/설치</div></div>'+
-    '<div class="kpi teal"><div class="v">'+avail+'</div><div class="l">가용 카드</div></div>'+
+    '<div class="kpi teal"><div class="v">'+avail+'</div><div class="l">가용 카드 (셋업 제외)</div></div>'+
     '<div class="kpi"><div class="v">'+actT+'</div><div class="l">진행 중 작업</div></div>';
 }
 
@@ -652,6 +675,7 @@ function renderTasks(){
     var endLbl='<span class="gEnd'+endCls+'" style="left:'+ep.toFixed(1)+'%;transform:'+(ep>80?'translateX(calc(-100% - 5px))':'translateX(5px)')+'">'+endTxt+'</span>';
     return '<div class="gRow"><div class="gLabel" title="'+esc(t.name)+'">'+esc(t.name)+'</div><div class="gTrack"><div class="gBar '+cls+'" style="left:'+l.toFixed(1)+'%;width:'+w.toFixed(1)+'%" title="'+fmtS(t.start)+' ~ '+fmtS(t.end)+'"></div>'+endLbl+'</div></div>';
   }).join('');
+  // 날짜 축 눈금 + 세로 그리드
   var spanDays=Math.max(Math.round((max-min)/86400000),1);
   var stepDays=spanDays<=21?3:(spanDays<=45?7:(spanDays<=100?14:30));
   var ticks=[];
@@ -671,7 +695,7 @@ function renderTasks(){
 }
 
 function renderServerTable(){
-  if(!servers.length){$('#serverBody').innerHTML='<tr><td colspan="10" style="color:var(--muted)">서버 데이터가 없습니다</td></tr>';return}
+  if(!servers.length){$('#serverBody').innerHTML='<tr><td colspan="14" style="color:var(--muted)">서버 데이터가 없습니다</td></tr>';return}
   var rows=servers.slice().sort(function(a,b){
     if(a.loc!==b.loc)return a.loc==='10층'?-1:(b.loc==='10층'?1:a.loc.localeCompare(b.loc));
     return a.id.localeCompare(b.id,undefined,{numeric:true});
@@ -689,6 +713,7 @@ function renderServerTable(){
       '<td class="mono">'+esc(s.svcIp||'-')+'</td>'+
       '<td class="mono">'+esc(s.bmcIp||'-')+'</td>'+
       '<td class="mono">'+esc(s.serial||'-')+'</td>'+
+      '<td>'+esc(s.drv||'-')+'</td><td>'+esc(s.os||'-')+'</td><td class="mono">'+esc(s.sdk||'-')+'</td>'+
       '<td>'+esc(act||'-')+'</td></tr>';
   }).join('');
   bindRowClicks('#serverBody tr.trow');
@@ -741,18 +766,19 @@ function init(){
   renderAll();
   setBadge('snap','스냅샷 '+SNAPSHOT_AT);
   $('#updatedAt').textContent='Notion 실시간 조회 중…';
-  $('#srcNote').innerHTML='데이터 출처: Notion 문서 「전사 서버 운용 현황」 · 기준 시각 '+SNAPSHOT_AT+'<br>사내 공유용 — 보안상 IP 마지막 옥텟과 시리얼은 마스킹되어 있습니다. GitHub Actions로 매일 09시/14시 자동 갱신.';
-  // 2단계: 라이브 조회 → 성공 시 교체
+  $('#srcNote').innerHTML='데이터 출처: Notion 문서 「전사 서버 운용 현황」 (운용 서버 현황 · 서버 사용 현황 DB)<br>열 때마다 최신 데이터를 자동 조회하며, 조회 실패 시 '+SNAPSHOT_AT+' 스냅샷을 표시합니다. 데이터 수정은 Notion에서 해 주세요.';
+  // 2단계: 라이브 조회 (수동 🔄 새로고침 버튼과 공용)
   var btn0=$('#btnRefresh');
   if(btn0)btn0.addEventListener('click',loadLive);
   loadLive();
 }
+/* Notion 실시간 조회 — 초기 로드와 🔄 새로고침 버튼이 공용 사용 */
 function loadLive(){
   var btn=$('#btnRefresh');
-  if(true){ /* 공개 배포본: 항상 스냅샷 표시 */
+  if(!(window.cowork&&typeof window.cowork.callMcpTool==='function')){
     if(btn)btn.style.display='none';
-    setBadge('live','기준 '+SNAPSHOT_AT);
-    $('#updatedAt').textContent='공개 배포본 · 매일 09시/14시 자동 갱신 (GitHub Actions)';
+    setBadge('snap','스냅샷 '+SNAPSHOT_AT);
+    $('#updatedAt').textContent='커넥터 브리지를 사용할 수 없어 스냅샷을 표시 중입니다.';
     return;
   }
   if(btn){btn.disabled=true;btn.textContent='⏳ 조회 중…'}
@@ -792,7 +818,6 @@ if(typeof document==='undefined'){
   init();
 }
 })();
-
 </script>
 </body>
 </html>
